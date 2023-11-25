@@ -1,99 +1,102 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createDrawerNavigator } from '@react-navigation/drawer';
-import { createStackNavigator } from '@react-navigation/stack';
-import HomeScreen from './src/screens/HomeScreen';
-import DetailsScreen from './src/screens/DetailsScreen';
-import Icon from 'react-native-vector-icons/Ionicons'; // Import the Icon component
-import { View } from 'react-native';
+// App.js
 
-const Drawer = createDrawerNavigator();
-const Stack = createStackNavigator();
+import React, { useState, useEffect } from 'react';
+import { View, Text, Button, FlatList } from 'react-native';
+import { PermissionsAndroid } from 'react-native';
+import BleManager from 'react-native-ble-manager';
 
-const App = () => {
+import {
+  scanForDevices,
+  connectToDevice,
+  disconnectDevice,
+  readCharacteristic,
+} from './BluetoothManager';
+
+export default function App() {
+  const [devices, setDevices] = useState([]);
+  const [connectedDevice, setConnectedDevice] = useState(null);
+  const scan_ForDevices = async () => {
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        {
+          title: 'Bluetooth Scan Permission',
+          message: 'This app needs Bluetooth Scan permission for device discovery.',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
+        }
+      );
+
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+        // Permission granted, proceed with scanning
+        const deviceCallback = (device) => {
+          setDevices((prevDevices) => [...prevDevices, device]);
+        };
+        scanForDevices(deviceCallback);
+      } else {
+        console.warn('Bluetooth Scan permission denied. Cannot scan for devices.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    const deviceCallback = (device) => {
+      setDevices((prevDevices) => [...prevDevices, device]);
+    };
+
+    scan_ForDevices(deviceCallback);
+
+    // Clean up when the component unmounts
+    return () => {
+      BleManager.stopScan();
+    };
+  }, []);
+
+  const connect = async (deviceId) => {
+    connectToDevice(deviceId);
+    setConnectedDevice(deviceId);
+  };
+
+  const disconnect = async () => {
+    if (connectedDevice) {
+      disconnectDevice(connectedDevice);
+      setConnectedDevice(null);
+    }
+  };
+
+  const readDeviceInfo = async () => {
+    if (connectedDevice) {
+      //0x2A25
+      const SERVICE_UUID = '00001800-0000-1000-8000-00805f9b34fb';
+      const DEVICE_INFORMATION_UUID = '00002A25-0000-1000-8000-00805f9b34fb';
+      readCharacteristic(connectedDevice, SERVICE_UUID, DEVICE_INFORMATION_UUID);
+    }
+  };
+
+  const readVolumeInfo = async () => {
+    // Similar to readDeviceInfo, but for the Volume Information characteristic
+  };
+
+  // Define other read functions for your characteristics as well
+
   return (
-    <NavigationContainer>
-      <Drawer.Navigator initialRouteName="Home">
-        <Drawer.Screen name="Home" component={HomeStackScreen} options={{ headerShown: false }} />
-      </Drawer.Navigator>
-    </NavigationContainer>
-  );
-};
-
-const HomeStackScreen = ({ navigation }) => {
-  return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          headerTitle: 'NY Times Most Viewed',
-          headerTitleAlign: 'center',
-          headerLeft: () => (
-            <Icon
-              name="menu-outline" // Use the appropriate icon name from the library
-              size={24}
-              color="white"
-              style={{ marginLeft: 10 }}
-              onPress={() => navigation.openDrawer()}
-            />
-          ),
-          headerRight: () => (
-            <View style={{flexDirection:'row'}}>
-              <Icon
-                name="search-outline" // Use the appropriate icon name from the library
-                size={24}
-                color="white"
-                style={{ marginRight: 10 }}
-                onPress={() => {
-                  // Implement search functionality here
-                }}
-              />
-              <Icon
-                name="ellipsis-vertical" // Use the appropriate icon name from the library
-                size={24}
-                color="white"
-                style={{ marginRight: 10 }}
-                onPress={() => {
-                  // Implement search functionality here
-                }}
-              />
-            </View>
-          ),
-          headerStyle: {
-            backgroundColor: '#52e3c4', // Set header background color
-            elevation: 0,
-            shadowOpacity: 0,
-          },
-          headerTintColor: 'white'
-        }}
+    <View>
+      <Button title="Disconnect" onPress={disconnect} disabled={!connectedDevice} />
+      <Button title="Scan for Devices" onPress={scan_ForDevices} />
+      <FlatList
+        data={devices}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <Button title={item.name || 'Unknown'} onPress={() => connect(item.id)} />
+        )}
       />
-       <Stack.Screen
-        name="Details"
-        component={DetailsScreen}
-        options={{
-          headerTitle: 'Article Details',
-          headerTitleAlign: 'center',
-          headerShown: true,
-          headerStyle: {
-            backgroundColor: '#52e3c4',
-            elevation: 0,
-            shadowOpacity: 0,
-          },
-          headerTintColor: 'white',
-          headerBackImage: () => (
-            <Icon
-              name="arrow-back-outline" // Use the appropriate icon name from the library
-              size={24}
-              color="white"
-              style={{ marginLeft: 10 }}
-            />
-          ),
-          headerBackTitleVisible: false, // Hide the "Back" text
-        }}
-      />
-    </Stack.Navigator>
-  );
-};
 
-export default App;
+      <Button title="Read Device Information" onPress={readDeviceInfo} disabled={!connectedDevice} />
+      {/* <Button title="Read Volume Information" onPress={readVolumeInfo} disabled={!connectedDevice} /> */}
+      {/* Add buttons for other characteristics here */}
+    </View>
+  );
+}
