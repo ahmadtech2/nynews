@@ -23,7 +23,16 @@ import { Buffer } from "@craftzdog/react-native-buffer";
 
 const BleManagerModule = NativeModules.BleManager;
 const BleManagerEmitter = new NativeEventEmitter(BleManagerModule);
-
+const serviceUUID = 'fef0'; // Device Information Service UUID
+const characteristicUUID = {
+  SERIAL: '2A25',
+  VOLUME: '2A41',
+  Unilateral_bilateral: 'FEF1',
+  Maximum_resistance: 'FEF2',
+  WiFi: 'FEF4',
+  DEVICE_ACTIVATION: 'FEF5',
+  PRIVATE_PROTOCOLE: '1234',
+}; // Serial Number String Characteristic UUID
 const App = () => {
   const peripherals = new Map();
   const [isScanning, setIsScanning] = useState(false);
@@ -181,16 +190,7 @@ const App = () => {
     // const characteristicUUID = '00002A25-0000-1000-8000-00805f9b34fb';
 
     const deviceId = peripheral.id; // Replace with the actual device ID
-    const serviceUUID = 'fef0'; // Device Information Service UUID
-    const characteristicUUID = {
-      SERIAL: '2A25',
-      VOLUME: '2A41',
-      Unilateral_bilateral: 'FEF1',
-      Maximum_resistance: 'FEF2',
-      WiFi: 'FEF4',
-      DEVICE_ACTIVATION: 'FEF5',
-      PRIVATE_PROTOCOLE: '1234',
-    }; // Serial Number String Characteristic UUID
+    
   
     const commandId = 0x0D;
     const parameter = 0x01;
@@ -243,6 +243,81 @@ const App = () => {
       Alert.alert('info', 'not connected');
     }
   }
+  const writeWeightData = async (peripheral) => {
+    try {
+      const deviceId = peripheral.id;
+      const weight = 40.5;
+      const first = 0xAB;
+      const second = 0xCD;
+      const command = 0x01; // Command ID for weight data
+  
+      // Convert weight to an 8-byte integer (left 4 bytes and right 4 bytes)
+      const weightInt = Math.round(weight * 10); // Multiply by 10 for transmission
+  
+      const leftAndRight = (weightInt >>> 0).toString(16).padStart(8, '0').match(/.{1,2}/g).map(byte => parseInt(byte, 16));
+  
+      // Construct payload
+      const payload = [first, second, command, ...leftAndRight, ...leftAndRight];
+  
+      // Convert payload to Buffer
+      const payloadBuffer = Buffer.from(payload);
+  
+      // Write payload to the characteristic
+      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer);
+      console.log('Weight data written successfully');
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+  const subscribeToNotifications = async (peripheral) => {
+    try {
+      const deviceId = peripheral.id;
+      // Subscribe to notifications for the characteristic
+      await BleManager.startNotification(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE);
+      console.log('Subscribed to characteristic notifications');
+  
+      // Listen for characteristic value updates
+      BleManager.onCharacteristicValueChanged((device, characteristic) => {
+        if (device.id === deviceId && characteristic.uuid === characteristicUUID.PRIVATE_PROTOCOLE) {
+          const value = characteristic.value; // Received value
+          console.log('onCharacteristicValueChanged received:', characteristic);
+          // Determine the type of notification based on the command ID
+          const commandId = value[2]; // Assuming command ID is at index 2
+          switch (commandId) {
+            case 0x06:
+              // Handle Notification 1 (Resistance Setting Synchronization)
+              // Extract and process the resistance value from the received data
+              const resistanceValue = parseResistanceValue(value);
+              console.log('Resistance setting received:', resistanceValue);
+              break;
+            case 0x08:
+              // Handle Notification 2 (Training Groups)
+              // Extract and process the group information from the received data
+              const groupInfo = parseGroupInfo(value);
+              console.log('Training groups received:', groupInfo);
+              break;
+            // Add cases for other command IDs if needed
+            default:
+              // Handle other notifications or command IDs as needed
+              break;
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+  const parseResistanceValue = (data) => {
+    // Parse and process the resistance value from the data
+    // Example: return the parsed resistance value
+    return data.slice(3); // Assuming resistance data starts at index 3
+  };
+  
+  const parseGroupInfo = (data) => {
+    // Parse and process the group information from the data
+    // Example: return the parsed group information
+    return data.slice(4); // Assuming group information starts at index 4
+  };
   const readWeightDataaa = async (peripheral) => {
     try {
       const serviceUUID = 'fef0';
@@ -306,6 +381,66 @@ const App = () => {
       console.error('Error:', error);
     }
   };
+  const readMotorStatus = async (peripheral) => {
+    try {
+      const deviceId = peripheral.id;
+      const first = 0xAB;
+      const second = 0xCD;
+      const command = 0x04; // Command ID for reading motor statuses
+  
+      // Construct payload
+      const payload = [first, second, command];
+  
+      // Convert payload to Buffer
+      const payloadBuffer = Buffer.from(payload);
+  
+      // Write payload to the characteristic
+      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer);
+      console.log('Command sent for reading motor statuses');
+  
+      // Wait for the device to respond
+      const data = await BleManager.read(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE);
+      console.log('Motor statuses response:', data);
+      
+      // Interpret and process the received data (left and right motor statuses)
+      const leftMotorStatus = data[0]; // Assuming left motor status is the first byte
+      const rightMotorStatus = data[1]; // Assuming right motor status is the second byte
+      
+      console.log('Left Motor Status:', leftMotorStatus);
+      console.log('Right Motor Status:', rightMotorStatus);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+  const setDeviceVolume = async (peripheral, volume) => {
+    try {
+      const deviceId = peripheral.id;
+      const first = 0xAB;
+      const second = 0xCD;
+      const command = 0x09;
+      // Construct payload for setting the volume
+      const payload = [first, second, command, 0x01, volume]; // Assuming 0x01 for parameter length
+  
+      // Convert payload to Buffer
+      const payloadBuffer = Buffer.from(payload);
+  
+      // Write payload to the characteristic
+      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer);
+      console.log('Command sent to set device volume');
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+  const setLowVolume = async (peripheral) => {
+    // Set low volume (0)
+    await setDeviceVolume(peripheral, 0x00);
+
+    // Set medium volume (1)
+    // await setDeviceVolume(deviceId, 0x01);
+
+    // Set high volume (2)
+    // await setDeviceVolume(deviceId, 0x02);
+  }
   // disconnect from device
   const disconnectFromPeripheral = peripheral => {
     // BleManager.removeBond(peripheral.id)
@@ -371,7 +506,10 @@ const App = () => {
                 peripheral={item}
                 connect={connectToPeripheral}
                 read={toggleRead}
-                readWeightData={readWeightData}
+                readWeightData={readMotorStatus}
+                writeWeightData={writeWeightData}
+                subscribeToNotifications={subscribeToNotifications}
+                setLowVolume={setLowVolume}
                 disconnect={disconnectFromPeripheral}
               />
             )}
@@ -394,7 +532,10 @@ const App = () => {
               <DeviceList
                 peripheral={item}
                 connect={connectToPeripheral}
-                readWeightData={readWeightData}
+                readWeightData={readMotorStatus}
+                writeWeightData={writeWeightData}
+                subscribeToNotifications={subscribeToNotifications}
+                setLowVolume={setLowVolume}
                 disconnect={disconnectFromPeripheral}
                 read={toggleRead}
               />
