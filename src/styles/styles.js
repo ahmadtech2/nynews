@@ -39,9 +39,10 @@ export const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   deviceContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     justifyContent: 'space-between',
     marginBottom: 10,
+
   },
   deviceItem: {
     marginBottom: 10,

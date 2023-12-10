@@ -243,31 +243,62 @@ const App = () => {
       Alert.alert('info', 'not connected');
     }
   }
+  const intToBytes = (intValue) => {
+    return [
+      (intValue >> 24) & 0xFF,
+      (intValue >> 16) & 0xFF,
+      (intValue >> 8) & 0xFF,
+      intValue & 0xFF,
+    ];
+  };
+  const int64ToBytes = (intValue) => {
+    return [
+      (intValue >> 56) & 0xFF,
+      (intValue >> 48) & 0xFF,
+      (intValue >> 40) & 0xFF,
+      (intValue >> 32) & 0xFF,
+      (intValue >> 24) & 0xFF,
+      (intValue >> 16) & 0xFF,
+      (intValue >> 8) & 0xFF,
+      intValue & 0xFF,
+    ];
+  };
   const writeWeightData = async (peripheral) => {
     try {
       const deviceId = peripheral.id;
-      const weight = 40.5;
+      const weight = 4.5;
       const first = 0xAB;
       const second = 0xCD;
       const command = 0x01; // Command ID for weight data
   
-      // Convert weight to an 8-byte integer (left 4 bytes and right 4 bytes)
-      const weightInt = Math.round(weight * 10); // Multiply by 10 for transmission
-  
-      const leftAndRight = (weightInt >>> 0).toString(16).padStart(8, '0').match(/.{1,2}/g).map(byte => parseInt(byte, 16));
-  
-      // Construct payload
-      const payload = [first, second, command, ...leftAndRight, ...leftAndRight];
-  
+      const payload = [first, second, command, ...[8,0,0,0,10,0,0,0,10]];
+      console.log(payload);
+      // Multiply weight by 10 and ensure it is within the range of 0 to 1000
+      // const weightInt = Math.round(weight * 10); // Multiplying by 10 for transmission
+      const clippedWeight = 1;//Math.min(Math.max(weightInt, 0), 1000); // Clipping weight between 0 and 100
+
+      // Convert weight to a 4-byte integer for left and right sides
+      // const leftWeight = clippedWeight & 0xFFFFFFFF; // First 4 bytes for left weight
+      // const rightWeight = clippedWeight & 0xFFFFFFFF; // Second 4 bytes for right weight (same as left)
+      // const payload = [first, second, command,  ...intToBytes(leftWeight), ...intToBytes(rightWeight)];
+
+      const combinedWeights = (clippedWeight << 32) | clippedWeight;
+      // const payload = [first, second, command, ...int64ToBytes(combinedWeights)];
+      [171, 205, 6, 8, 140, 0, 0, 0, 140, 0, 0, 0]
+      [171, 205, 1, 5,   0, 0, 0, 5, 0, 0, 0]
       // Convert payload to Buffer
       const payloadBuffer = Buffer.from(payload);
-  
+      console.log('payloadBuffer', payloadBuffer);
+      console.log(payloadBuffer.toJSON().data);
       // Write payload to the characteristic
-      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer);
+      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer.toJSON().data);
       console.log('Weight data written successfully');
     } catch (error) {
       console.error('Error:', error);
     }
+  };
+  const handleUpdateValueForCharacteristic = (data) => {
+    console.log('Received characteristic value:', data); // Handle the received data here
   };
   const subscribeToNotifications = async (peripheral) => {
     try {
@@ -276,33 +307,37 @@ const App = () => {
       await BleManager.startNotification(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE);
       console.log('Subscribed to characteristic notifications');
   
+      BleManagerEmitter.addListener(
+        'BleManagerDidUpdateValueForCharacteristic',
+        handleUpdateValueForCharacteristic
+      );
       // Listen for characteristic value updates
-      BleManager.onCharacteristicValueChanged((device, characteristic) => {
-        if (device.id === deviceId && characteristic.uuid === characteristicUUID.PRIVATE_PROTOCOLE) {
-          const value = characteristic.value; // Received value
-          console.log('onCharacteristicValueChanged received:', characteristic);
-          // Determine the type of notification based on the command ID
-          const commandId = value[2]; // Assuming command ID is at index 2
-          switch (commandId) {
-            case 0x06:
-              // Handle Notification 1 (Resistance Setting Synchronization)
-              // Extract and process the resistance value from the received data
-              const resistanceValue = parseResistanceValue(value);
-              console.log('Resistance setting received:', resistanceValue);
-              break;
-            case 0x08:
-              // Handle Notification 2 (Training Groups)
-              // Extract and process the group information from the received data
-              const groupInfo = parseGroupInfo(value);
-              console.log('Training groups received:', groupInfo);
-              break;
-            // Add cases for other command IDs if needed
-            default:
-              // Handle other notifications or command IDs as needed
-              break;
-          }
-        }
-      });
+      // BleManager.onCharacteristicValueChanged((device, characteristic) => {
+      //   if (device.id === deviceId && characteristic.uuid === characteristicUUID.PRIVATE_PROTOCOLE) {
+      //     const value = characteristic.value; // Received value
+      //     console.log('onCharacteristicValueChanged received:', characteristic);
+      //     // Determine the type of notification based on the command ID
+      //     const commandId = value[2]; // Assuming command ID is at index 2
+      //     switch (commandId) {
+      //       case 0x06:
+      //         // Handle Notification 1 (Resistance Setting Synchronization)
+      //         // Extract and process the resistance value from the received data
+      //         const resistanceValue = parseResistanceValue(value);
+      //         console.log('Resistance setting received:', resistanceValue);
+      //         break;
+      //       case 0x08:
+      //         // Handle Notification 2 (Training Groups)
+      //         // Extract and process the group information from the received data
+      //         const groupInfo = parseGroupInfo(value);
+      //         console.log('Training groups received:', groupInfo);
+      //         break;
+      //       // Add cases for other command IDs if needed
+      //       default:
+      //         // Handle other notifications or command IDs as needed
+      //         break;
+      //     }
+      //   }
+      // });
     } catch (error) {
       console.error('Error:', error);
     }
@@ -395,9 +430,15 @@ const App = () => {
       const payloadBuffer = Buffer.from(payload);
   
       // Write payload to the characteristic
-      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer);
+      await BleManager.writeWithoutResponse(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer.toJSON().data);
       console.log('Command sent for reading motor statuses');
-  
+      // await BleManager.write(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE, payloadBuffer.toJSON().data).then(result => {
+      //   console.log('write response', result);
+      // }).catch(error => {
+      //   console.log('write response error', error);
+      // });
+
+      // return;
       // Wait for the device to respond
       const data = await BleManager.read(deviceId, serviceUUID, characteristicUUID.PRIVATE_PROTOCOLE);
       console.log('Motor statuses response:', data);
@@ -532,7 +573,7 @@ const App = () => {
               <DeviceList
                 peripheral={item}
                 connect={connectToPeripheral}
-                readWeightData={readMotorStatus}
+                readWeightData={readMotorStatus} //readMotorStatus
                 writeWeightData={writeWeightData}
                 subscribeToNotifications={subscribeToNotifications}
                 setLowVolume={setLowVolume}
